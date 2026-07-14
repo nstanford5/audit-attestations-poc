@@ -18,10 +18,6 @@ export struct Attestation {
   active: Boolean, // false once revoked
 }
 
-// ---------------------------------------------------------------------------
-// Public ledger state
-// ---------------------------------------------------------------------------
-
 // MNF registry-operator identity (a DApp-specific derived public key).
 export sealed ledger owner: Bytes<32>;
 
@@ -35,28 +31,15 @@ export ledger auditorNames: Map<Bytes<32>, Opaque<"string">>;
 // Attestation records keyed by the audited contract's code hash.
 export ledger attestations: Map<Bytes<32>, Attestation>;
 
-// ---------------------------------------------------------------------------
-// Private witnesses (implemented off-chain in TypeScript)
-// ---------------------------------------------------------------------------
-
-// The caller's secret key, used for DApp-specific identity derivation.
 witness localSk(): Bytes<32>;
-
 // THE private datum: count of unresolved Critical/High findings from the
 // confidential audit report. This must NEVER be disclosed or written on-chain.
 witness unresolvedFindings(): Uint<16>;
 
-// ---------------------------------------------------------------------------
-// Constructor
-// ---------------------------------------------------------------------------
 
 constructor() {
   owner = disclose(getDappPubKey(localSk()));
 }
-
-// ---------------------------------------------------------------------------
-// Circuits
-// ---------------------------------------------------------------------------
 
 // Approve (or re-approve) an auditor and record their display name. MNF only.
 export circuit approveAuditor(auditorPk: Bytes<32>, name: Opaque<"string">): [] {
@@ -90,11 +73,13 @@ export circuit postAttestation(codeHash: Bytes<32>, claimTier: Uint<8>, timestam
   const count = unresolvedFindings();
   assert(count == 0, "cannot attest: unresolved Critical/High findings remain");
 
-  const record = Attestation { auditor: callerKey,
-                               conclusion: true,
-                               claimTier: disclose(claimTier),
-                               timestamp: disclose(timestamp),
-                               active: true };
+  const record = Attestation { 
+    auditor: callerKey,
+    conclusion: true,
+    claimTier: disclose(claimTier),
+    timestamp: disclose(timestamp),
+    active: true 
+  };
   attestations.insert(disclose(codeHash), record);
 }
 
@@ -111,19 +96,17 @@ export circuit revokeAttestation(codeHash: Bytes<32>): [] {
          "not authorized to revoke this attestation"
          );
 
-  const updated = Attestation { auditor: record.auditor,
-                                conclusion: record.conclusion,
-                                claimTier: record.claimTier,
-                                timestamp: record.timestamp,
-                                active: false };
+  const updated = Attestation { 
+    auditor: record.auditor,
+    conclusion: record.conclusion,
+    claimTier: record.claimTier,
+    timestamp: record.timestamp,
+    active: false 
+  };
   attestations.insert(key, updated);
 }
 
-// ---------------------------------------------------------------------------
-// Helper circuit
-// ---------------------------------------------------------------------------
-
 // Derive a DApp-specific public key from a secret key (domain-separated).
-export circuit getDappPubKey(sk: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "audit-attest:pk:"), sk]);
+export circuit getDappPubKey(_sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "audit-attest:pk:"), _sk]);
 }

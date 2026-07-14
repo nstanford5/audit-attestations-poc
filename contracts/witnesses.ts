@@ -6,7 +6,7 @@
 // leave the device except as constraints inside the ZK proof.
 
 import { type Ledger } from './managed/audit-attestation/contract/index.js';
-import { type WitnessContext } from '@midnight-ntwrk/compact-runtime';
+import { type WitnessContext } from '@midnight-ntwrk/midnight-js-protocol/compact-runtime';
 
 // The prover's private state.
 //   sk:                the 32-byte secret used to derive this DApp identity.
