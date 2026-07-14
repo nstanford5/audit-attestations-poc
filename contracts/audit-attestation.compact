@@ -1,0 +1,129 @@
+// ZK-native audit attestation — PoC for Midnight.
+//
+// An MNF-curated set of named auditors post on-chain attestations for smart
+// contracts. The sensitive audit findings (the count of unresolved
+// Critical/High issues) stay PRIVATE in a witness and are never written to
+// the ledger; only a proven boolean conclusion + public metadata is stored.
+
+pragma language_version 0.23;
+
+import CompactStandardLibrary;
+
+// A single attestation record, keyed on-chain by the audited contract's code hash.
+export struct Attestation {
+  auditor: Bytes<32>, // attesting auditor's derived public key
+  conclusion: Boolean, // proven audit conclusion (true = passed)
+  claimTier: Uint<8>, // scope/assurance tier claimed by the auditor
+  timestamp: Uint<64>, // auditor-supplied timestamp
+  active: Boolean, // false once revoked
+}
+
+// ---------------------------------------------------------------------------
+// Public ledger state
+// ---------------------------------------------------------------------------
+
+// MNF registry-operator identity (a DApp-specific derived public key).
+export sealed ledger owner: Bytes<32>;
+
+// Approved-auditor registry: present + true = approved, present + false =
+// revoked, absent = never seen.
+export ledger approvedAuditors: Map<Bytes<32>, Boolean>;
+
+// Display names — auditors are intentionally NON-anonymous.
+export ledger auditorNames: Map<Bytes<32>, Opaque<"string">>;
+
+// Attestation records keyed by the audited contract's code hash.
+export ledger attestations: Map<Bytes<32>, Attestation>;
+
+// ---------------------------------------------------------------------------
+// Private witnesses (implemented off-chain in TypeScript)
+// ---------------------------------------------------------------------------
+
+// The caller's secret key, used for DApp-specific identity derivation.
+witness localSk(): Bytes<32>;
+
+// THE private datum: count of unresolved Critical/High findings from the
+// confidential audit report. This must NEVER be disclosed or written on-chain.
+witness unresolvedFindings(): Uint<16>;
+
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+
+constructor() {
+  owner = disclose(getDappPubKey(localSk()));
+}
+
+// ---------------------------------------------------------------------------
+// Circuits
+// ---------------------------------------------------------------------------
+
+// Approve (or re-approve) an auditor and record their display name. MNF only.
+export circuit approveAuditor(auditorPk: Bytes<32>, name: Opaque<"string">): [] {
+  const caller = getDappPubKey(localSk());
+  assert(owner == disclose(caller), "only MNF can approve auditors");
+
+  approvedAuditors.insert(disclose(auditorPk), true);
+  auditorNames.insert(disclose(auditorPk), disclose(name));
+}
+
+// Revoke an auditor's approval. MNF only.
+export circuit revokeAuditor(auditorPk: Bytes<32>): [] {
+  const caller = getDappPubKey(localSk());
+  assert(owner == disclose(caller), "only MNF can revoke auditors");
+
+  approvedAuditors.insert(disclose(auditorPk), false);
+}
+
+// Post an attestation for `codeHash`. The caller must be an approved auditor,
+// and the confidential report must have zero unresolved Critical/High findings.
+export circuit postAttestation(codeHash: Bytes<32>, claimTier: Uint<8>, timestamp: Uint<64>): [] {
+  const caller = getDappPubKey(localSk());
+  const callerKey = disclose(caller);
+
+  // Distinguish never-seen from revoked from approved.
+  assert(approvedAuditors.member(callerKey), "caller is not an approved auditor");
+  assert(approvedAuditors.lookup(callerKey), "caller is not an approved auditor");
+
+  // Read the PRIVATE finding count and constrain it WITHOUT disclosing it.
+  // The comparison result stays private; only the proof attests count == 0.
+  const count = unresolvedFindings();
+  assert(count == 0, "cannot attest: unresolved Critical/High findings remain");
+
+  const record = Attestation { auditor: callerKey,
+                               conclusion: true,
+                               claimTier: disclose(claimTier),
+                               timestamp: disclose(timestamp),
+                               active: true };
+  attestations.insert(disclose(codeHash), record);
+}
+
+// Revoke an existing attestation. Allowed for MNF or the attesting auditor.
+export circuit revokeAttestation(codeHash: Bytes<32>): [] {
+  const key = disclose(codeHash);
+  assert(attestations.member(key), "no attestation exists for this code hash");
+
+  const caller = getDappPubKey(localSk());
+  const callerKey = disclose(caller);
+
+  const record = attestations.lookup(key);
+  assert(callerKey == owner || callerKey == record.auditor,
+         "not authorized to revoke this attestation"
+         );
+
+  const updated = Attestation { auditor: record.auditor,
+                                conclusion: record.conclusion,
+                                claimTier: record.claimTier,
+                                timestamp: record.timestamp,
+                                active: false };
+  attestations.insert(key, updated);
+}
+
+// ---------------------------------------------------------------------------
+// Helper circuit
+// ---------------------------------------------------------------------------
+
+// Derive a DApp-specific public key from a secret key (domain-separated).
+export circuit getDappPubKey(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "audit-attest:pk:"), sk]);
+}
