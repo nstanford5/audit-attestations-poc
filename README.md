@@ -1,3 +1,5 @@
+This project is built on the Midnight Network.
+
 # ZK-Native Audit Attestation — PoC
 
 A proof-of-concept Midnight DApp that implements the core of the
